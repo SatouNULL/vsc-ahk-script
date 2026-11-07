@@ -6,23 +6,43 @@ Persistent
 JsonPath  := A_AppData "\Code\User\settings.json"
 JsonKey   := "glassit.alpha"
 CallValue := "255"       ; opaque VS Code while in a call; previous value is restored afterwards
-PollMs := 3000
+PollMs := 1000
+EndDelayMs := 5000       ; time without sharing before restoring (avoids flicker when a share toolbar briefly hides)
 ChromiumBrowsers := ["chrome.exe", "msedge.exe", "brave.exe", "opera.exe", "vivaldi.exe", "chromium.exe", "Arc.exe"]
 FirefoxBrowsers  := ["firefox.exe", "librewolf.exe", "waterfox.exe", "floorp.exe", "zen.exe"]
-CallApps         := ["Teams.exe", "MSTeams", "Zoom.exe", "Loom.exe"]   ; non-browser apps whose mic use counts as a call
+ShareWindows     := [                          ; windows that only exist while an app is screen sharing (find with Window Spy)
+    "Meeting compact view ahk_exe ms-teams.exe",
+    "ahk_class ZPFloatToolbarClass ahk_exe Zoom.exe"
+]
 ; ----------------------------------------
 
 InCall := false
 WEStopped := false
 SavedValue := ""
+LastSeen := 0
 
 SetTimer(Check, PollMs)
 Check()
 
+; React as soon as any window is shown instead of waiting for the next poll
+DllCall("SetWinEventHook", "UInt", 0x8002, "UInt", 0x8002, "Ptr", 0         ; EVENT_OBJECT_SHOW
+    , "Ptr", CallbackCreate(OnWindowShown), "UInt", 0, "UInt", 0, "UInt", 0)  ; WINEVENT_OUTOFCONTEXT
+
+OnWindowShown(hook, event, hwnd, idObject, idChild, thread, time) {
+    if (idObject = 0 && idChild = 0)    ; OBJID_WINDOW, not carets/menus/etc.
+        SetTimer(CheckNow, -1)
+}
+
+CheckNow() => Check()                   ; separate function so it doesn't replace the Check poll timer
+
 Check() {
-    Global InCall, WEStopped, SavedValue
+    Global InCall, WEStopped, SavedValue, LastSeen
     active := IsInCall()
+    if active
+        LastSeen := A_TickCount
     if (active = InCall)
+        return
+    if (!active && A_TickCount - LastSeen < EndDelayMs)
         return
     InCall := active
 
@@ -64,50 +84,16 @@ WallpaperControl(cmd) {
 }
 
 IsInCall() {
-    if DeviceInUse("webcam")                                                    ; any app using the camera
-        return true
-    micApps := []
-    micApps.Push(ChromiumBrowsers*), micApps.Push(FirefoxBrowsers*), micApps.Push(CallApps*)
-    if DeviceInUse("microphone", micApps)                                       ; browser / Teams call (camera off)
-        return true
     for exe in ChromiumBrowsers
         if WinExist("is sharing ahk_exe " exe)                                  ; "x is sharing your screen" bar
             return true
     for exe in FirefoxBrowsers
-        if WinExist("Sharing Indicator ahk_exe " exe)                           ; camera/mic/screen sharing indicator
+        if WinExist("Sharing Indicator ahk_exe " exe)                           ; Firefox sharing indicator
             return true
-    if WinExist("Sharing control bar ahk_exe ms-teams.exe")                     ; Teams screen share toolbar
-        return true
-    return false
-}
-
-; Windows records camera/mic use per app; LastUsedTimeStop = 0 means "still in use"
-DeviceInUse(device, apps := "") {
-    root := "HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\" device
-    Loop Reg, root, "R" {
-        if (A_LoopRegName != "LastUsedTimeStop")
-            continue
-        if (RegReadQword(A_LoopRegKey, "LastUsedTimeStop") !== 0)
-            continue
-        if !RegReadQword(A_LoopRegKey, "LastUsedTimeStart")
-            continue
-        if !IsObject(apps)
+    for title in ShareWindows
+        if WinExist(title)
             return true
-        for app in apps
-            if InStr(A_LoopRegKey, app)
-                return true
-    }
     return false
-}
-
-; RegRead() can't read REG_QWORD, so query HKCU directly; returns "" if missing
-RegReadQword(key, name) {
-    subKey := SubStr(key, InStr(key, "\") + 1)
-    buf := Buffer(8, 0), size := 8
-    if DllCall("advapi32\RegGetValueW", "Ptr", 0x80000001, "Str", subKey, "Str", name
-        , "UInt", 0x48, "Ptr", 0, "Ptr", buf, "UInt*", &size) != 0    ; HKEY_CURRENT_USER, RRF_RT_QWORD
-        return ""
-    return NumGet(buf, "Int64")
 }
 
 ; Replaces the key's value in place (comments/formatting kept) and returns the old value
