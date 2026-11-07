@@ -6,7 +6,7 @@ The wallpapers are from [Wallpaper Engine](https://store.steampowered.com/app/43
 
 ![VSCode with the desktop wallpaper](image.png)
 
-## CallMode
+# CallMode
 
 When you are screen sharing, this script makes VS Code opaque and stops Wallpaper Engine so nobody sees the wallpaper. Everything goes back to normal a few seconds after the share ends.
 
@@ -23,6 +23,6 @@ During a share, `glassit.alpha` is set to `255` in VS Code's `settings.json` and
 
 Wallpaper Engine is paused with its `-control stop` command and resumed with `-control play`, so it doesn't show the crash / Safe Start prompt. If it isn't running, it's left alone.
 
-## Usage
+# Usage
 
 Requires [AutoHotkey v2](https://www.autohotkey.com/). Run `Main.ahk` to start both scripts, or run `VSC-hide.ahk` / `CallMode.ahk` on their own.
